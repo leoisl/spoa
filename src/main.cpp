@@ -7,6 +7,8 @@
 #include "biosoup/sequence.hpp"
 
 #include "spoa/spoa.hpp"
+#include <cereal/archives/portable_binary.hpp>
+#include <fstream>
 
 std::atomic<std::uint32_t> biosoup::Sequence::num_objects{0};
 
@@ -69,6 +71,10 @@ void Help() {
       "    input file in FASTA/FASTQ format (can be compressed with gzip)\n"
       "\n"
       "  options:\n"
+      "    -L <filepath>\n"
+      "      filepath of POA to be loaded\n"
+      "    -S <filepath>\n"
+      "      filepath to save POA\n"
       "    -m <int>\n"
       "      default: 5\n"
       "      score for matching bases\n"
@@ -213,12 +219,15 @@ int main(int argc, char** argv) {
   std::uint8_t algorithm = 0;
   std::vector<std::uint8_t> results = { 0 };
   std::string dot_path{};
+  std::string previous_POA_filepath_to_load;
+  std::string filepath_to_save_POA;
   bool is_strand_ambiguous = false;
-
-  std::string optstr = "m:n:g:e:q:c:l:r:d:sh";
+  std::string optstr = "AL:S:m:n:g:e:q:c:l:r:d:sh";
   int opt;
   while ((opt = getopt_long(argc, argv, optstr.c_str(), options, nullptr)) != -1) {  // NOLINT
     switch (opt) {
+      case 'L': previous_POA_filepath_to_load = optarg; break;
+      case 'S': filepath_to_save_POA = optarg; break;
       case 'm': m = atoi(optarg); break;
       case 'n': n = atoi(optarg); break;
       case 'g': g = atoi(optarg); break;
@@ -261,18 +270,14 @@ int main(int argc, char** argv) {
   std::vector<std::unique_ptr<biosoup::Sequence>> sequences;
   sequences = sparser->Parse(-1);
 
-  std::size_t max_sequence_len = 0;
-  for (const auto& it : sequences) {
-    max_sequence_len = std::max(max_sequence_len, it->data.size());
-  }
-  try {
-    alignment_engine->Prealloc(max_sequence_len, 4);
-  } catch (std::invalid_argument& exception) {
-    std::cerr << exception.what() << std::endl;
-    return 1;
+  spoa::Graph graph{};
+  if (not previous_POA_filepath_to_load.empty()) {
+    std::cerr << "Loading POA from " << previous_POA_filepath_to_load << std::endl;
+    std::ifstream input_stream(previous_POA_filepath_to_load, std::ios::binary);
+    cereal::PortableBinaryInputArchive input_archive(input_stream);
+    graph.load(input_archive);
   }
 
-  spoa::Graph graph{};
   std::vector<bool> is_reversed;
   for (const auto& it : sequences) {
     std::int32_t score = 0;
@@ -349,6 +354,13 @@ int main(int argc, char** argv) {
   }
 
   graph.PrintDot(dot_path);
+
+  if (not filepath_to_save_POA.empty()) {
+    std::cerr << "Saving POA to " << filepath_to_save_POA << std::endl;
+    std::ofstream output_stream(filepath_to_save_POA, std::ios::binary);
+    cereal::PortableBinaryOutputArchive output_archive(output_stream);
+    graph.save(output_archive);
+  }
 
   return 0;
 }
